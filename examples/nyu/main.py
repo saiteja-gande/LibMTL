@@ -12,14 +12,14 @@ from LibMTL.utils import set_random_seed, set_device
 from LibMTL.config import LibMTL_args, prepare_args
 import LibMTL.weighting as weighting_method
 import LibMTL.architecture as architecture_method
-
+import wandb
 def parse_args(parser):
     parser.add_argument('--aug', action='store_true', default=False, help='data augmentation')
     parser.add_argument('--train_mode', default='trainval', type=str, help='trainval, train')
     parser.add_argument('--train_bs', default=8, type=int, help='batch size for training')
     parser.add_argument('--test_bs', default=8, type=int, help='batch size for test')
     parser.add_argument('--epochs', default=200, type=int, help='training epochs')
-    parser.add_argument('--dataset_path', default='/', type=str, help='dataset path')
+    parser.add_argument('--dataset_path', default='/home/saiteja/LibMTL/nyuv2', type=str, help='dataset path')
     return parser.parse_args()
     
 def main(params):
@@ -33,7 +33,7 @@ def main(params):
         dataset=nyuv2_train_set,
         batch_size=params.train_bs,
         shuffle=True,
-        num_workers=2,
+        num_workers=4,
         pin_memory=True,
         drop_last=True)
     
@@ -41,7 +41,7 @@ def main(params):
         dataset=nyuv2_test_set,
         batch_size=params.test_bs,
         shuffle=False,
-        num_workers=2,
+        num_workers=4,
         pin_memory=True)
     
     # define tasks
@@ -110,4 +110,11 @@ if __name__ == "__main__":
     set_device(params.gpu_id)
     # set random seed
     set_random_seed(params.seed)
+    wandb.init(project='your_project_name', config=params)
+    config = wandb.config
+    config.aug = params.aug
+    config.train_mode = params.train_mode
+    config.train_bs = params.train_bs
+    config.test_bs = params.test_bs
+    config.epochs = params.epochs
     main(params)
