@@ -42,23 +42,35 @@ class NYUv2(Dataset):
 
     Please note that: all baselines and MTAN did NOT apply data augmentation in the original paper.
     """
-    def __init__(self, root, mode='train', augmentation=False):
+    def __init__(self, root, mode='train',samples_per_class =50, augmentation=False):
         self.mode = mode
         self.root = os.path.expanduser(root)
         self.augmentation = augmentation
+        self.samples_per_class = samples_per_class
         
         with open(os.path.join(get_root_dir(), 'examples/nyu', 'data_split.json'), 'r') as f:
             data_split = json.load(f)
         train_index, val_index = data_split['train'], data_split['val']
+        labeled_indices = []
+        unlabeled_indices = []
+        
         # read the data file
         if self.mode == 'train':
             self.index_list = train_index
+            print('ac')
             self.data_path = self.root + '/train'
         elif self.mode == 'val':
             self.index_list = val_index
             self.data_path = self.root + '/train'
         elif self.mode == 'trainval':
             self.index_list = train_index + val_index
+            for class_index in range(40):  # Assuming you have the number of classes
+                print(class_index)
+                class_indices = [i for i, label in enumerate(self.index_list) if label == class_index]
+                labeled_indices.extend(class_indices[:samples_per_class])
+                unlabeled_indices.extend(class_indices[samples_per_class:])
+            self.data_indices = labeled_indices
+            print('ad')
             self.data_path = self.root + '/train'
         elif self.mode == 'test':
             data_len = len(fnmatch.filter(os.listdir(self.root + '/val/image'), '*.npy'))
@@ -67,6 +79,18 @@ class NYUv2(Dataset):
 
         # calculate data length
 #         self.data_len = len(fnmatch.filter(os.listdir(self.data_path + '/image'), '*.npy'))
+
+
+
+
+        # Assign data indices based on the mode
+        if self.mode == 'labeled':
+            self.data_indices = labeled_indices
+            print('a')
+        elif self.mode == 'unlabeled':
+            self.data_indices = unlabeled_indices
+            print('b')
+
 
     def __getitem__(self, i):
         index = self.index_list[i]
@@ -86,7 +110,6 @@ class NYUv2(Dataset):
                 normal = torch.flip(normal, dims=[2])
                 normal[0, :, :] = - normal[0, :, :]
 
-        # print(image.shape)
         return image.float(), {'segmentation': semantic.float(), 'depth': depth.float(), 'normal': normal.float()}
 
     def __len__(self):

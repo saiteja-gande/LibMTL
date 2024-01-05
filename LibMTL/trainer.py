@@ -2,6 +2,7 @@ import torch, os
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
+from torch.utils.data.dataset import Dataset
 
 from LibMTL._record import _PerformanceMeter
 from LibMTL.utils import count_parameters
@@ -200,8 +201,9 @@ class Trainer(nn.Module):
             return_weight (bool): if ``True``, the loss weights will be returned.
         '''
         train_loader, train_batch = self._prepare_dataloaders(train_dataloaders)
+        # print(train_batch)
         train_batch = max(train_batch) if self.multi_input else train_batch
-        
+        # print('in train')
         self.batch_weight = np.zeros([self.task_num, epochs, train_batch])
         self.model.train_loss_buffer = np.zeros([self.task_num, epochs])
         self.model.epochs = epochs
@@ -209,11 +211,18 @@ class Trainer(nn.Module):
             self.model.epoch = epoch
             self.model.train()
             self.meter.record_time('begin')
+            # print(epoch)
             for batch_index in range(train_batch):
                 if not self.multi_input:
                     train_inputs, train_gts = self._process_data(train_loader)
                     train_preds = self.model(train_inputs)
                     train_preds = self.process_preds(train_preds)
+                    # for key, value in train_preds.items():
+                        # print('shape of  train preds')
+                        # print(train_preds[key].shape)
+                    # for key, value in train_gts.items():
+                        # print('shape of  ground trouths')
+                        # print(train_gts[key].shape)
                     train_losses = self._compute_loss(train_preds, train_gts)
                     self.meter.update(train_preds, train_gts)
                 else:
@@ -241,7 +250,7 @@ class Trainer(nn.Module):
             if val_dataloaders is not None:
                 self.meter.has_val = True
                 val_improvement = self.test(val_dataloaders, epoch, mode='val', return_improvement=True)
-            self.test(test_dataloaders, epoch, mode='test')
+            # self.test(test_dataloaders, epoch, mode='test')
             if self.scheduler is not None:
                 if self.scheduler_param['scheduler'] == 'reduce' and val_dataloaders is not None:
                     self.scheduler.step(val_improvement)
@@ -292,3 +301,103 @@ class Trainer(nn.Module):
         self.meter.reinit()
         if return_improvement:
             return improvement
+        
+    def pseudo(self, unlabeled_loader):
+            r'''The test process of multi-task learning.
+
+            Args:
+                test_dataloaders (dict or torch.utils.data.DataLoader): If ``multi_input`` is ``True``, \
+                                it is a dictionary of name-dataloader pairs. Otherwise, it is a single \
+                                dataloader which returns data and a dictionary of name-label pairs in each iteration.
+                epoch (int, default=None): The current epoch. 
+            '''
+            unlabeled_loader, unlabeled_batch = self._prepare_dataloaders(unlabeled_loader)
+            # print(len(unlabeled_loader[0]))
+            self.model.eval()
+            with torch.no_grad():
+                if not self.multi_input:
+                    for batch_index in range(unlabeled_batch):
+                        unlabeled_inputs, _ = self._process_data(unlabeled_loader)
+                        # print(unlabeled_inputs.shape)
+                        pseudo_labels = self.model(unlabeled_inputs)
+                        pseudo_labels = self.process_preds(pseudo_labels)
+                        unlabeled_inputs = unlabeled_inputs.squeeze(0)
+                        # print(unlabeled_inputs.shape)
+                        if batch_index == 0 :
+                            labels = pseudo_labels
+                            data = unlabeled_inputs
+                        else:
+                            labels.update(pseudo_labels)
+                            data = torch.cat((data,unlabeled_inputs),dim=0)
+                        # data = data + (unlabeled_inputs, pseudo_labels)
+                        # data.append(unlabeled_inputs, pseudo_labels)
+                        # print(len(data))
+                        # print(data.shape)
+                        # print('in pseudo')
+
+                else:
+                    for tn, task in enumerate(self.task_name):
+                        for batch_index in range(unlabeled_batch[tn]):
+                            unlabeled_inputs, _ = self._process_data(unlabeled_loader[task])
+                            pseudo_labels = self.model(unlabeled_inputs, task)
+                            pseudo_labels = pseudo_labels[task]
+                            pseudo_labels = self.process_preds(pseudo_labels)
+            unlabeled_inputs = unlabeled_inputs.to('cpu', non_blocking=True)
+            for task in self.task_name:
+                pseudo_labels[task] = pseudo_labels[task].to('cpu', non_blocking=True)
+            data.shape
+            # labels.shape
+            return data,labels
+
+    def generate_pseudo_labels(self, unlabeled_loader):
+        pseudo_labels = []
+        unlabeled_loader, unlabeled_batch = self._prepare_dataloaders(unlabeled_loader)
+        print(len(unlabeled_loader[0]))
+        self.model.eval()
+        with torch.no_grad():
+            for batch_index in range(unlabeled_batch):
+                # Assuming pseudo labels are generated using self.model
+                unlabeled_inputs, _ = self._process_data(unlabeled_loader)
+                unlabeled_inputs = unlabeled_inputs.to(self.device)
+                pseudo_label_preds = self.model(unlabeled_inputs)
+                pseudo_label_preds = self.process_preds(pseudo_label_preds)
+                # Append each pseudo label dictionary to the list
+                # for pred in pseudo_label_preds:
+                #     processed_pseudo_label = self.process_preds(pred)
+                pseudo_labels.append(pseudo_label_preds)
+        return pseudo_labels
+    
+    def create_pseudo_label_dataset(self, pseudo_labels, unlabeled_loader):
+        # Create a new dataset using pseudo labels and unlabeled data
+        class PseudoLabelDataset(Dataset):
+            def __init__(self, pseudo_labels, unlabeled_loader):
+                self.pseudo_labels = pseudo_labels
+                self.unlabeled_loader = unlabeled_loader
+
+            def __len__(self):
+                return len(self.pseudo_labels)
+
+            def __getitem__(self, idx):
+                image, _ = next(iter(self.unlabeled_loader))
+                # Assuming image is the unlabeled data from the loader
+                pseudo_label = self.pseudo_labels[idx]
+                image = image.squeeze(0) # not fixing completely
+                for key, value in pseudo_label.items():
+                    pseudo_label[key] = value.squeeze(0)
+                    # print('check now')
+                    # print(pseudo_label[key].shape)
+                    if key == 'segmentation':
+                        # print(pseudo_label[key].shape)
+                        if pseudo_label[key].shape == torch.Size([13, 288, 384]) :
+                            pseudo_label[key] = pseudo_label[key].view(13, 288, 384)
+                            pseudo_label[key], _ = torch.max(pseudo_label[key], dim=0)
+                        # pseudo_label[key] = F.interpolate(value, size=(288, 384), mode='bilinear', align_corners=False)
+                        # print(pseudo_label[key].shape)
+                # print(image.shape)
+                # for key, value in pseudo_label.items():
+                    # print(pseudo_label[key].shape)
+                return image.float(), pseudo_label  # pseudo_label is a dictionary
+
+        # Create a PseudoLabelDataset instance
+        pseudo_label_dataset = PseudoLabelDataset(pseudo_labels, unlabeled_loader)
+        return pseudo_label_dataset

@@ -1,7 +1,7 @@
 import torch, argparse
 import torch.nn as nn
 import torch.nn.functional as F
-
+from torch.utils.data import random_split, ConcatDataset
 from utils import *
 from aspp import DeepLabHead
 from create_dataset import NYUv2
@@ -17,8 +17,8 @@ def parse_args(parser):
     parser.add_argument('--aug', action='store_true', default=False, help='data augmentation')
     parser.add_argument('--train_mode', default='trainval', type=str, help='trainval, train')
     parser.add_argument('--train_bs', default=8, type=int, help='batch size for training')
-    parser.add_argument('--test_bs', default=8, type=int, help='batch size for test')
-    parser.add_argument('--epochs', default=200, type=int, help='training epochs')
+    parser.add_argument('--test_bs', default=1, type=int, help='batch size for test')
+    parser.add_argument('--epochs', default=1, type=int, help='training epochs')
     parser.add_argument('--dataset_path', default='/home/saiteja/LibMTL/nyuv2', type=str, help='dataset path')
     return parser.parse_args()
     
@@ -28,15 +28,36 @@ def main(params):
     # prepare dataloaders
     nyuv2_train_set = NYUv2(root=params.dataset_path, mode=params.train_mode, augmentation=params.aug)
     nyuv2_test_set = NYUv2(root=params.dataset_path, mode='test', augmentation=False)
+    total_samples = len(nyuv2_train_set)
+    # print(total_samples)
+    labeled_samples = int(0.1 * total_samples)
+    unlabeled_samples = total_samples - labeled_samples
+    # print(labeled_samples)
+    labeled_set, unlabeled_set = random_split(nyuv2_train_set, [labeled_samples,unlabeled_samples])
+    # print(labeled_set[0])
+    # print(len(unlabeled_set))
+    # nyuv2_train_loader = torch.utils.data.DataLoader(
+    #     dataset=nyuv2_train_set,
+    #     batch_size=params.train_bs,
+    #     shuffle=True,
+    #     num_workers=4,
+    #     pin_memory=True,
+    #     drop_last=True)
     
-    nyuv2_train_loader = torch.utils.data.DataLoader(
-        dataset=nyuv2_train_set,
+    nyuv2_label_loader = torch.utils.data.DataLoader(
+        dataset=labeled_set,
         batch_size=params.train_bs,
         shuffle=True,
         num_workers=4,
         pin_memory=True,
         drop_last=True)
-    
+    nyuv2_unlabel_loader = torch.utils.data.DataLoader(
+        dataset=unlabeled_set,
+        batch_size=1,
+        shuffle=True,
+        num_workers=4,
+        pin_memory=True,
+        drop_last=True)
     nyuv2_test_loader = torch.utils.data.DataLoader(
         dataset=nyuv2_test_set,
         batch_size=params.test_bs,
@@ -98,7 +119,24 @@ def main(params):
                           load_path=params.load_path,
                           **kwargs)
     if params.mode == 'train':
-        NYUmodel.train(nyuv2_train_loader, nyuv2_test_loader, params.epochs)
+        NYUmodel.train(nyuv2_label_loader, nyuv2_test_loader, 1)
+        p_l = NYUmodel.generate_pseudo_labels(nyuv2_unlabel_loader)
+        pseudo_set = NYUmodel.create_pseudo_label_dataset(p_l, nyuv2_unlabel_loader)
+        # pseudo_set = NYUv3(nyuv2_unlabel_loader, model )
+        # NYUmodel.pseudo(nyuv2_unlabel_loader)
+        # print(len(pseudo_set))
+        combined_set = ConcatDataset([labeled_set,pseudo_set])
+        # print(len(combined_set))
+        combined_loader = torch.utils.data.DataLoader(
+        dataset=pseudo_set,
+        batch_size=2,
+        shuffle=True,
+        num_workers=0,
+        drop_last=True)
+
+        torch.cuda.empty_cache()
+        NYUmodel.train(combined_loader, nyuv2_test_loader, 20)
+
     elif params.mode == 'test':
         NYUmodel.test(nyuv2_test_loader)
     else:
