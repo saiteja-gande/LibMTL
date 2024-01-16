@@ -241,7 +241,7 @@ class Trainer(nn.Module):
             if val_dataloaders is not None:
                 self.meter.has_val = True
                 val_improvement = self.test(val_dataloaders, epoch, mode='val', return_improvement=True)
-            self.test(test_dataloaders, epoch, mode='test')
+            # self.test(test_dataloaders, epoch, mode='test')
             if self.scheduler is not None:
                 if self.scheduler_param['scheduler'] == 'reduce' and val_dataloaders is not None:
                     self.scheduler.step(val_improvement)
@@ -292,3 +292,117 @@ class Trainer(nn.Module):
         self.meter.reinit()
         if return_improvement:
             return improvement
+
+    def train_sl(self, train_dataloaders, test_dataloaders,u_dataloaders, epochs, 
+              val_dataloaders=None, return_weight=False):
+        r'''The training process of multi-task learning.
+
+        Args:
+            train_dataloaders (dict or torch.utils.data.DataLoader): The dataloaders used for training. \
+                            If ``multi_input`` is ``True``, it is a dictionary of name-dataloader pairs. \
+                            Otherwise, it is a single dataloader which returns data and a dictionary \
+                            of name-label pairs in each iteration.
+
+            test_dataloaders (dict or torch.utils.data.DataLoader): The dataloaders used for the validation or testing. \
+                            The same structure with ``train_dataloaders``.
+            epochs (int): The total training epochs.
+            return_weight (bool): if ``True``, the loss weights will be returned.
+        '''
+        train_loader, train_batch = self._prepare_dataloaders(train_dataloaders)
+        u_train_loader, u_train_batch = self._prepare_dataloaders(u_dataloaders)
+        train_batch = max(train_batch) if self.multi_input else train_batch
+        self.batch_weight = np.zeros([self.task_num, epochs, train_batch])
+        self.model.train_loss_buffer = np.zeros([self.task_num, epochs])
+        self.model.epochs = epochs
+        for epoch in range(epochs):
+            # print(epoch)
+            # if epoch > 1 :
+            #     self.model.eval()
+            #     with torch.no_grad():
+            #         u_train_inputs, _ = self._process_data(u_train_loader)
+            #         u_train_inputs = u_train_inputs.to(self.device)
+            #         u_train_preds = self.model(u_train_inputs)
+            #         u_train_preds = self.process_preds(u_train_preds)
+            target={}
+            self.model.epoch = epoch
+            self.model.train()
+            self.meter.record_time('begin')
+            for batch_index in range(train_batch):
+                if not self.multi_input:
+                    if epoch > 0 :
+                        self.model.eval()
+                        with torch.no_grad():
+                            u_train_inputs, _ = self._process_data(u_train_loader)
+                            u_train_inputs = u_train_inputs.to(self.device)
+                            u_train_preds = self.model(u_train_inputs)
+                            u_train_preds = self.process_preds(u_train_preds)
+                            for key, value in u_train_preds.items():
+                                u_train_preds[key] = value.squeeze(0)
+                                # print('check now')
+                                # print(pseudo_label[key].shape)
+                                if key == 'segmentation':
+                                    # print(pseudo_label[key].shape)
+                                    if u_train_preds[key].shape == torch.Size([13, 288, 384]) :
+                                        u_train_preds[key] = u_train_preds[key].view(13, 288, 384)
+                                        u_train_preds[key], _ = torch.max(u_train_preds[key], dim=0)
+                        train_inputs, train_gts = self._process_data(train_loader)
+                        data = torch.cat([train_inputs,u_train_inputs],dim=0)
+                        print(data.shape)
+                        self.model.train()
+                        for key, values in train_gts.items():
+                            t_train_gts = train_gts[key]
+                            t_train_preds = u_train_preds[key]
+                            if t_train_preds.shape == torch.Size([3, 13, 288, 384]) :
+                                t_train_preds = t_train_preds.argmax(dim=1)
+                            # print(t_train_gts.shape)
+                            # print(t_train_preds.shape)
+                            target.update({key : torch.cat([t_train_gts, t_train_preds], dim=0)})
+                            print(target[key].shape)
+                        # target = torch.cat([train_gts,u_train_preds],dim=0)
+                        train_preds = self.model(data)
+                        train_preds = self.process_preds(train_preds)
+                        train_losses = self._compute_loss(train_preds, target)
+                        self.meter.update(train_preds, target) 
+                    else :
+                        train_inputs, train_gts = self._process_data(train_loader)
+                        train_preds = self.model(train_inputs)
+                        train_preds = self.process_preds(train_preds)
+                        train_losses = self._compute_loss(train_preds, train_gts)
+                        self.meter.update(train_preds, train_gts)
+                else:
+                    train_losses = torch.zeros(self.task_num).to(self.device)
+                    for tn, task in enumerate(self.task_name):
+                        train_input, train_gt = self._process_data(train_loader[task])
+                        train_pred = self.model(train_input, task)
+                        train_pred = train_pred[task]
+                        train_pred = self.process_preds(train_pred, task)
+                        train_losses[tn] = self._compute_loss(train_pred, train_gt, task)
+                        self.meter.update(train_pred, train_gt, task)
+
+                self.optimizer.zero_grad(set_to_none=False)
+                w = self.model.backward(train_losses, **self.kwargs['weight_args'])
+                if w is not None:
+                    self.batch_weight[:, epoch, batch_index] = w
+                self.optimizer.step()
+            
+            self.meter.record_time('end')
+            self.meter.get_score()
+            self.model.train_loss_buffer[:, epoch] = self.meter.loss_item
+            self.meter.display(epoch=epoch, mode='train')
+            self.meter.reinit()
+            
+            if val_dataloaders is not None:
+                self.meter.has_val = True
+                val_improvement = self.test(val_dataloaders, epoch, mode='val', return_improvement=True)
+            # self.test(test_dataloaders, epoch, mode='test')
+            if self.scheduler is not None:
+                if self.scheduler_param['scheduler'] == 'reduce' and val_dataloaders is not None:
+                    self.scheduler.step(val_improvement)
+                else:
+                    self.scheduler.step()
+            if self.save_path is not None and self.meter.best_result['epoch'] == epoch:
+                torch.save(self.model.state_dict(), os.path.join(self.save_path, 'best.pt'))
+                print('Save Model {} to {}'.format(epoch, os.path.join(self.save_path, 'best.pt')))
+        self.meter.display_best_result()
+        if return_weight:
+            return self.batch_weight

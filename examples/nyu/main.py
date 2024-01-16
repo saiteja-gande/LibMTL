@@ -1,7 +1,7 @@
 import torch, argparse
 import torch.nn as nn
 import torch.nn.functional as F
-
+from torch.utils.data import random_split, ConcatDataset
 from utils import *
 from aspp import DeepLabHead
 from create_dataset import NYUv2
@@ -16,7 +16,7 @@ import wandb
 def parse_args(parser):
     parser.add_argument('--aug', action='store_true', default=False, help='data augmentation')
     parser.add_argument('--train_mode', default='trainval', type=str, help='trainval, train')
-    parser.add_argument('--train_bs', default=8, type=int, help='batch size for training')
+    parser.add_argument('--train_bs', default=2, type=int, help='batch size for training')
     parser.add_argument('--test_bs', default=8, type=int, help='batch size for test')
     parser.add_argument('--epochs', default=200, type=int, help='training epochs')
     parser.add_argument('--dataset_path', default='/home/saiteja/LibMTL/nyuv2', type=str, help='dataset path')
@@ -28,12 +28,17 @@ def main(params):
     # prepare dataloaders
     nyuv2_train_set = NYUv2(root=params.dataset_path, mode=params.train_mode, augmentation=params.aug)
     nyuv2_test_set = NYUv2(root=params.dataset_path, mode='test', augmentation=False)
-    
-    nyuv2_train_loader = torch.utils.data.DataLoader(
-        dataset=nyuv2_train_set,
+    total_samples = len(nyuv2_train_set)
+    # print(total_samples)
+    labeled_samples = int(0.5 * total_samples) #todo: splitting the data should change batchsize
+    unlabeled_samples = total_samples - labeled_samples
+    # print(labeled_samples)
+    labeled_set, unlabeled_set = random_split(nyuv2_train_set, [labeled_samples,unlabeled_samples])
+    nyuv2_label_loader = torch.utils.data.DataLoader(
+        dataset=labeled_set,
         batch_size=params.train_bs,
         shuffle=True,
-        num_workers=4,
+        num_workers=8,
         pin_memory=True,
         drop_last=True)
     
@@ -44,6 +49,13 @@ def main(params):
         num_workers=4,
         pin_memory=True)
     
+    nyuv2_unlabel_loader = torch.utils.data.DataLoader(
+        dataset=unlabeled_set,
+        batch_size=3,
+        shuffle=True,
+        num_workers=8,
+        pin_memory=True,
+        drop_last=True)
     # define tasks
     task_dict = {'segmentation': {'metrics':['mIoU', 'pixAcc'], 
                               'metrics_fn': SegMetric(),
@@ -98,7 +110,8 @@ def main(params):
                           load_path=params.load_path,
                           **kwargs)
     if params.mode == 'train':
-        NYUmodel.train(nyuv2_train_loader, nyuv2_test_loader, params.epochs)
+        NYUmodel.train_sl(nyuv2_label_loader, nyuv2_test_loader,nyuv2_unlabel_loader, params.epochs)
+        # NYUmodel.train(nyuv2_train_loader, nyuv2_test_loader, params.epochs)
     elif params.mode == 'test':
         NYUmodel.test(nyuv2_test_loader)
     else:
