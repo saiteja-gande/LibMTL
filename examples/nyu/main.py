@@ -5,7 +5,7 @@ import torch.nn.functional as F
 from utils import *
 from aspp import DeepLabHead
 from create_dataset import NYUv2
-
+from torch.utils.data import random_split, ConcatDataset
 from LibMTL import Trainer
 from LibMTL.model import resnet_dilated
 from LibMTL.utils import set_random_seed, set_device
@@ -28,12 +28,15 @@ def main(params):
     # prepare dataloaders
     nyuv2_train_set = NYUv2(root=params.dataset_path, mode=params.train_mode, augmentation=params.aug)
     nyuv2_test_set = NYUv2(root=params.dataset_path, mode='test', augmentation=False)
-    
-    nyuv2_train_loader = torch.utils.data.DataLoader(
-        dataset=nyuv2_train_set,
-        batch_size=params.train_bs,
+    total_samples = len(nyuv2_train_set)
+    labeled_samples = int(0.5 * total_samples) #todo: splitting the data should change batchsize
+    unlabeled_samples = total_samples - labeled_samples
+    labeled_set, unlabeled_set = random_split(nyuv2_train_set, [labeled_samples,unlabeled_samples])
+    nyuv2_label_loader = torch.utils.data.DataLoader(
+        dataset=labeled_set,
+        batch_size=4,
         shuffle=True,
-        num_workers=4,
+        num_workers=8,
         pin_memory=True,
         drop_last=True)
     
@@ -41,27 +44,26 @@ def main(params):
         dataset=nyuv2_test_set,
         batch_size=params.test_bs,
         shuffle=False,
-        num_workers=4,
+        num_workers=8,
         pin_memory=True)
-    
+    nyuv2_unlabel_loader = torch.utils.data.DataLoader(
+        dataset=unlabeled_set,
+        batch_size=2,
+        shuffle=True,
+        num_workers=8,
+        pin_memory=True,
+        drop_last=True)
     # define tasks
-    task_dict = {'segmentation': {'metrics':['mIoU', 'pixAcc'], 
-                              'metrics_fn': SegMetric(),
-                              'loss_fn': SegLoss(),
-                              'weight': [1, 1]}, 
+    task_dict = { 
                  'depth': {'metrics':['abs_err', 'rel_err'], 
                            'metrics_fn': DepthMetric(),
                            'loss_fn': DepthLoss(),
-                           'weight': [0, 0]},
-                 'normal': {'metrics':['mean', 'median', '<11.25', '<22.5', '<30'], 
-                            'metrics_fn': NormalMetric(),
-                            'loss_fn': NormalLoss(),
-                            'weight': [0, 0, 1, 1, 1]}}
+                           'weight': [0, 0]},}
     
     # define encoder and decoders
     def encoder_class(): 
         return resnet_dilated('resnet50')
-    num_out_channels = {'segmentation': 13, 'depth': 1, 'normal': 3}
+    num_out_channels = {'depth': 1}
     decoders = nn.ModuleDict({task: DeepLabHead(2048, 
                                                 num_out_channels[task]) for task in list(task_dict.keys())})
     
@@ -98,7 +100,8 @@ def main(params):
                           load_path=params.load_path,
                           **kwargs)
     if params.mode == 'train':
-        NYUmodel.train(nyuv2_train_loader, nyuv2_test_loader, params.epochs)
+        NYUmodel.train_sl(nyuv2_label_loader, nyuv2_test_loader,nyuv2_unlabel_loader, params.epochs)
+        # NYUmodel.train(nyuv2_train_loader, nyuv2_test_loader, params.epochs)
     elif params.mode == 'test':
         NYUmodel.test(nyuv2_test_loader)
     else:
