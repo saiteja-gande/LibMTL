@@ -8,7 +8,7 @@ import numpy as np
 import random
 import json
 from LibMTL.utils import get_root_dir
-
+import kornia as K
 
 class RandomScaleCrop(object):
     """
@@ -46,6 +46,23 @@ class NYUv2(Dataset):
         self.mode = mode
         self.root = os.path.expanduser(root)
         self.augmentation = augmentation
+        if self.augmentation:
+            self._augmentations = K.augmentation.AugmentationSequential(
+                K.augmentation.RandomHorizontalFlip(p=0.75),
+                K.augmentation.RandomVerticalFlip(p=0.75),
+                K.augmentation.RandomAffine(degrees=10.0),
+                K.augmentation.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.2),
+                K.augmentation.RandomSharpness(sharpness=0.5),
+                # K.augmentation.RandomMotionBlur(kernel_size=(3, 7), angle=(0, 360), direction='horizontal'),
+            )
+            self._aaaugmentations = K.augmentation.AugmentationSequential(
+                K.augmentation.RandomHorizontalFlip(p=0.75),
+                K.augmentation.RandomVerticalFlip(p=0.75),
+                K.augmentation.RandomAffine(degrees=10.0),
+                # K.augmentation.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.2),
+                # K.augmentation.RandomSharpness(sharpness=0.5),
+                # K.augmentation.RandomMotionBlur(kernel_size=(3, 7), angle=(0, 360), direction='horizontal'),
+            )
         
         with open(os.path.join(get_root_dir(), 'examples/nyu', 'data_split.json'), 'r') as f:
             data_split = json.load(f)
@@ -79,6 +96,20 @@ class NYUv2(Dataset):
         # apply data augmentation if required
         if self.augmentation:
             image, semantic, depth, normal = RandomScaleCrop()(image, semantic, depth, normal)
+            # sample = {"input": image, "mask": semantic}
+            # image = self._augmentations(**sample)
+            # print('in augmentations')
+            # image, semantic = sample["input"], sample["mask"]
+            # print(image.shape)
+            # image = self._augmentations(image)
+            # image = image.squeeze(0)
+            # image = torch.flip(image, dims=[2])
+            # # print(image.shape)
+            # semantic = self._aaaugmentations(semantic)
+            # semantic = semantic.squeeze()
+            # semantic = torch.flip(semantic, dims=[1])
+            # # print(semantic.shape)
+
             if torch.rand(1) < 0.5:
                 image = torch.flip(image, dims=[2])
                 semantic = torch.flip(semantic, dims=[1])
@@ -86,7 +117,7 @@ class NYUv2(Dataset):
                 normal = torch.flip(normal, dims=[2])
                 normal[0, :, :] = - normal[0, :, :]
 
-        return image.float(), {'depth': depth.float()}
+        return image.float(), {'segmentation': semantic.float()}
 
     def __len__(self):
         return len(self.index_list)

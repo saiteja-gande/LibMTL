@@ -352,7 +352,7 @@ class Trainer(nn.Module):
                         for key, values in train_gts.items():
                             t_train_gts = train_gts[key]
                             t_train_preds = u_train_preds[key]
-                            if t_train_preds.shape == torch.Size([3, 13, 288, 384]) :
+                            if not t_train_preds.shape == t_train_gts.shape :
                                 t_train_preds = t_train_preds.argmax(dim=1)
                             # print(t_train_gts.shape)
                             # print(t_train_preds.shape)

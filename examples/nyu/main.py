@@ -13,6 +13,7 @@ from LibMTL.config import LibMTL_args, prepare_args
 import LibMTL.weighting as weighting_method
 import LibMTL.architecture as architecture_method
 import wandb
+
 def parse_args(parser):
     parser.add_argument('--aug', action='store_true', default=False, help='data augmentation')
     parser.add_argument('--train_mode', default='trainval', type=str, help='trainval, train')
@@ -20,6 +21,7 @@ def parse_args(parser):
     parser.add_argument('--test_bs', default=8, type=int, help='batch size for test')
     parser.add_argument('--epochs', default=200, type=int, help='training epochs')
     parser.add_argument('--dataset_path', default='/home/saiteja/LibMTL/nyuv2', type=str, help='dataset path')
+    parser.add_argument('--split', default=1.0, type=float, help='splitting the dataset and default is 1' )
     return parser.parse_args()
     
 def main(params):
@@ -29,12 +31,12 @@ def main(params):
     nyuv2_train_set = NYUv2(root=params.dataset_path, mode=params.train_mode, augmentation=params.aug)
     nyuv2_test_set = NYUv2(root=params.dataset_path, mode='test', augmentation=False)
     total_samples = len(nyuv2_train_set)
-    labeled_samples = int(0.5 * total_samples) #todo: splitting the data should change batchsize
+    labeled_samples = int(params.split * total_samples) #todo: splitting the data should change batchsize
     unlabeled_samples = total_samples - labeled_samples
     labeled_set, unlabeled_set = random_split(nyuv2_train_set, [labeled_samples,unlabeled_samples])
     nyuv2_label_loader = torch.utils.data.DataLoader(
         dataset=labeled_set,
-        batch_size=4,
+        batch_size=params.train_bs,
         shuffle=True,
         num_workers=8,
         pin_memory=True,
@@ -46,24 +48,17 @@ def main(params):
         shuffle=False,
         num_workers=8,
         pin_memory=True)
-    nyuv2_unlabel_loader = torch.utils.data.DataLoader(
-        dataset=unlabeled_set,
-        batch_size=2,
-        shuffle=True,
-        num_workers=8,
-        pin_memory=True,
-        drop_last=True)
     # define tasks
     task_dict = { 
-                 'depth': {'metrics':['abs_err', 'rel_err'], 
-                           'metrics_fn': DepthMetric(),
-                           'loss_fn': DepthLoss(),
-                           'weight': [0, 0]},}
+                 'segmentation': {'metrics':['mIoU', 'pixAcc'], 
+                              'metrics_fn': SegMetric(),
+                              'loss_fn': SegLoss(),
+                              'weight': [1, 1]}}
     
     # define encoder and decoders
     def encoder_class(): 
-        return resnet_dilated('resnet50')
-    num_out_channels = {'depth': 1}
+        return resnet_dilated('resnet50', pretrained=False)
+    num_out_channels = {'segmentation': 13}
     decoders = nn.ModuleDict({task: DeepLabHead(2048, 
                                                 num_out_channels[task]) for task in list(task_dict.keys())})
     
@@ -100,8 +95,18 @@ def main(params):
                           load_path=params.load_path,
                           **kwargs)
     if params.mode == 'train':
-        NYUmodel.train_sl(nyuv2_label_loader, nyuv2_test_loader,nyuv2_unlabel_loader, params.epochs)
-        # NYUmodel.train(nyuv2_train_loader, nyuv2_test_loader, params.epochs)
+        if params.split == 1 :
+            NYUmodel.train(nyuv2_label_loader, nyuv2_test_loader, params.epochs) #with 1 * samples
+        else:
+            nyuv2_unlabel_loader = torch.utils.data.DataLoader(
+                dataset=unlabeled_set,
+                batch_size=0.5 * params.train_bs,
+                shuffle=True,
+                num_workers=8,
+                pin_memory=True,
+                drop_last=True)
+            NYUmodel.train_sl(nyuv2_label_loader, nyuv2_test_loader,nyuv2_unlabel_loader, params.epochs)
+            
     elif params.mode == 'test':
         NYUmodel.test(nyuv2_test_loader)
     else:
@@ -113,6 +118,7 @@ if __name__ == "__main__":
     set_device(params.gpu_id)
     # set random seed
     set_random_seed(params.seed)
+    # wandb.init(project='omni', config=params)
     wandb.init(project='your_project_name', config=params)
     config = wandb.config
     config.aug = params.aug
@@ -120,4 +126,5 @@ if __name__ == "__main__":
     config.train_bs = params.train_bs
     config.test_bs = params.test_bs
     config.epochs = params.epochs
+    config.split = params.split
     main(params)
