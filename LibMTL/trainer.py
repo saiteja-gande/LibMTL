@@ -241,7 +241,7 @@ class Trainer(nn.Module):
             if val_dataloaders is not None:
                 self.meter.has_val = True
                 val_improvement = self.test(val_dataloaders, epoch, mode='val', return_improvement=True)
-            # self.test(test_dataloaders, epoch, mode='test')
+            self.test(test_dataloaders, epoch, mode='test')
             if self.scheduler is not None:
                 if self.scheduler_param['scheduler'] == 'reduce' and val_dataloaders is not None:
                     self.scheduler.step(val_improvement)
@@ -329,35 +329,63 @@ class Trainer(nn.Module):
             self.meter.record_time('begin')
             for batch_index in range(train_batch):
                 if not self.multi_input:
-                    if epoch > 0 :
+                    if epoch > 40 :
                         self.model.eval()
                         with torch.no_grad():
                             u_train_inputs, _ = self._process_data(u_train_loader)
                             u_train_inputs = u_train_inputs.to(self.device)
                             u_train_preds = self.model(u_train_inputs)
                             u_train_preds = self.process_preds(u_train_preds)
-                            for key, value in u_train_preds.items():
-                                u_train_preds[key] = value.squeeze(0)
-                                # print('check now')
-                                # print(pseudo_label[key].shape)
-                                if key == 'segmentation':
-                                    # print(pseudo_label[key].shape)
-                                    if u_train_preds[key].shape == torch.Size([13, 288, 384]) :
-                                        u_train_preds[key] = u_train_preds[key].view(13, 288, 384)
-                                        u_train_preds[key], _ = torch.max(u_train_preds[key], dim=0)
+                            # for key, value in u_train_preds.items():
+                            #     u_train_preds[key] = value.squeeze(0)
+                            #     # print('check now')
+                            #     # print(u_train_preds[key].shape)
+                            #     if key == 'segmentation':
+                            #         # print(pseudo_label[key].shape)
+                            #         if u_train_preds[key].shape == torch.Size([13, 288, 384]) :
+                            #             u_train_preds[key] = u_train_preds[key].view(13, 288, 384)
+                            #             u_train_preds[key], _ = F.softmax(u_train_preds[key], dim=0)#softlabels
+                            #             u_train_preds[key] = u_train_preds[key].view(288, 384)
+                            #             print(u_train_preds[key].shape)
                         train_inputs, train_gts = self._process_data(train_loader)
+                        
                         data = torch.cat([train_inputs,u_train_inputs],dim=0)
-                        print(data.shape)
+                        # print(data.shape)
                         self.model.train()
-                        for key, values in train_gts.items():
+                        # for key, value in u_train_preds.items():
+                        #     u_train_preds[key] = value.squeeze(0)
+                        #     # print('check now')
+                        #     # print(u_train_preds[key].shape)
+                        #     z = u_train_preds[key].size(0)
+                        #     if key == 'segmentation':
+                        #         # print(pseudo_label[key].shape)
+                        #         if not u_train_preds[key].shape == train_gts[key].shape :
+                        #             u_train_preds[key] = u_train_preds[key].view(z, 13, 288, 384)
+                        #             print(u_train_preds[key].shape)
+                        #             u_train_preds[key], _ = F.softmax(u_train_preds[key], dim=1)#softlabels
+                        #             # u_train_preds[key] = u_train_preds[key].view(288, 384)
+                        #             print(u_train_preds[key].shape)
+                        #     target.update({key : torch.cat([train_gts[key], u_train_preds[key]], dim=0)})
+
+
+
+
+                        for key, values in train_gts.items():#to merge predictions
+                            # print(train_gts[key].shape)
+                            # print(u_train_preds[key].shape)
                             t_train_gts = train_gts[key]
                             t_train_preds = u_train_preds[key]
-                            if t_train_preds.shape == torch.Size([3, 13, 288, 384]) :
+                            if key == 'segmentation':
+                                t_train_preds = F.softmax(t_train_preds, dim=1) #torch.sigmoid(t_train_preds) 
+                                #F.softmax(t_train_preds, dim=1)
                                 t_train_preds = t_train_preds.argmax(dim=1)
-                            # print(t_train_gts.shape)
-                            # print(t_train_preds.shape)
+                                # if not t_train_preds.shape == t_train_gts.shape :
+                                    # t_train_preds = t_train_preds.argmax(dim=1)
+                                # print('aaa')
+                                # print(t_train_gts.shape)
+                                # print(t_train_preds.shape)
                             target.update({key : torch.cat([t_train_gts, t_train_preds], dim=0)})
-                            print(target[key].shape)
+                            # print(target[key].shape)
                         # target = torch.cat([train_gts,u_train_preds],dim=0)
                         train_preds = self.model(data)
                         train_preds = self.process_preds(train_preds)
@@ -394,7 +422,7 @@ class Trainer(nn.Module):
             if val_dataloaders is not None:
                 self.meter.has_val = True
                 val_improvement = self.test(val_dataloaders, epoch, mode='val', return_improvement=True)
-            # self.test(test_dataloaders, epoch, mode='test')
+            self.test(test_dataloaders, epoch, mode='test')
             if self.scheduler is not None:
                 if self.scheduler_param['scheduler'] == 'reduce' and val_dataloaders is not None:
                     self.scheduler.step(val_improvement)
