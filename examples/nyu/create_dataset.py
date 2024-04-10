@@ -46,47 +46,85 @@ class NYUv2(Dataset):
         self.mode = mode
         self.root = os.path.expanduser(root)
         self.augmentation = augmentation
-        
-        with open(os.path.join(get_root_dir(), 'examples/nyu', 'data_split.json'), 'r') as f:
+        self.pseudo_labels = {}
+        self._pseudo_labels_updated = False
+
+        with open(os.path.join(get_root_dir(), 'examples/nyu', '75labeled_25unlabeled_data.json'), 'r') as f:
             data_split = json.load(f)
-        train_index, val_index = data_split['train'], data_split['val']
-        # read the data file
-        if self.mode == 'train':
-            self.index_list = train_index
+        labeled_index, unlabeled_index = data_split['labeled'], data_split['unlabeled']
+        
+        if self.mode == 'labeled':
+            self.index_list = labeled_index
             self.data_path = self.root + '/train'
-        elif self.mode == 'val':
-            self.index_list = val_index
-            self.data_path = self.root + '/train'
-        elif self.mode == 'trainval':
-            self.index_list = train_index + val_index
+        elif self.mode == 'unlabeled':
+            self.index_list = unlabeled_index
             self.data_path = self.root + '/train'
         elif self.mode == 'test':
             data_len = len(fnmatch.filter(os.listdir(self.root + '/val/image'), '*.npy'))
             self.index_list = list(range(data_len))
             self.data_path = self.root + '/val'
 
-        # calculate data length
-#         self.data_len = len(fnmatch.filter(os.listdir(self.data_path + '/image'), '*.npy'))
-
+    def update_pseudo_labels(self, pseudo_labels, unlabeled_images=None):
+        # Update pseudo labels and images for unlabeled data
+        self.pseudo_labels = pseudo_labels
+        # self.unlabeled_images = unlabeled_images
+        self._pseudo_labels_updated = True
     def __getitem__(self, i):
         index = self.index_list[i]
-        # load data from the pre-processed npy files
-        image = torch.from_numpy(np.moveaxis(np.load(self.data_path + '/image/{:d}.npy'.format(index)), -1, 0))
-        semantic = torch.from_numpy(np.load(self.data_path + '/label/{:d}.npy'.format(index)))
-        depth = torch.from_numpy(np.moveaxis(np.load(self.data_path + '/depth/{:d}.npy'.format(index)), -1, 0))
-        normal = torch.from_numpy(np.moveaxis(np.load(self.data_path + '/normal/{:d}.npy'.format(index)), -1, 0))
+        if self.mode == 'unlabeled' and self._pseudo_labels_updated:
+            
+            pseudo_label = {key: value[i].float() for key, value in self.pseudo_labels.items()}
+            image = torch.from_numpy(np.moveaxis(np.load(self.data_path + '/image/{:d}.npy'.format(i)), -1, 0))
+            image = image.to("cpu")
+            return image.float(), {'segmentation': pseudo_label['segmentation'].float().to("cpu"), 
+                           'depth': pseudo_label['depth'].float().to("cpu"), 
+                           'normal': pseudo_label['normal'].float().to("cpu")}
+        else:
+            image = torch.from_numpy(np.moveaxis(np.load(self.data_path + '/image/{:d}.npy'.format(index)), -1, 0))
+            semantic = torch.from_numpy(np.load(self.data_path + '/label/{:d}.npy'.format(index)))
+            depth = torch.from_numpy(np.moveaxis(np.load(self.data_path + '/depth/{:d}.npy'.format(index)), -1, 0))
+            normal = torch.from_numpy(np.moveaxis(np.load(self.data_path + '/normal/{:d}.npy'.format(index)), -1, 0))
 
-        # apply data augmentation if required
-        if self.augmentation:
-            image, semantic, depth, normal = RandomScaleCrop()(image, semantic, depth, normal)
-            if torch.rand(1) < 0.5:
-                image = torch.flip(image, dims=[2])
-                semantic = torch.flip(semantic, dims=[1])
-                depth = torch.flip(depth, dims=[2])
-                normal = torch.flip(normal, dims=[2])
-                normal[0, :, :] = - normal[0, :, :]
-
-        return image.float(), {'segmentation': semantic.float(), 'depth': depth.float(), 'normal': normal.float()}
+            if self.augmentation:
+                image, semantic, depth, normal = RandomScaleCrop()(image, semantic, depth, normal)
+                if torch.rand(1) < 0.5:
+                    image = torch.flip(image, dims=[2])
+                    semantic = torch.flip(semantic, dims=[1])
+                    depth = torch.flip(depth, dims=[2])
+                    normal = torch.flip(normal, dims=[2])
+                    normal[0, :, :] = - normal[0, :, :]
+            semantic+=1
+            semantic = F.one_hot(semantic.long(), num_classes=14).permute(2, 0, 1)
+            return image.float(), {'segmentation': semantic.float(), 'depth': depth.float(), 'normal': normal.float()}
 
     def __len__(self):
-        return len(self.index_list)
+        if self.mode == 'unlabeled' and self._pseudo_labels_updated:
+            with open(os.path.join(get_root_dir(), 'examples/nyu', '25labeled_75unlabeled_data.json'), 'r') as f:
+                data_split = json.load(f)
+            labeled_index, unlabeled_index = data_split['labeled'], data_split['unlabeled']
+            # return len(labeled_index) + len(unlabeled_index)
+            return len(self.index_list) 
+        else:
+            return len(self.index_list)
+
+from torch.utils.data.dataset import ConcatDataset
+
+class CombinedNYUv2(Dataset):
+    def __init__(self, labeled_dataset, unlabeled_dataset):
+        self.labeled_dataset = labeled_dataset
+        self.unlabeled_dataset = unlabeled_dataset
+
+    def __getitem__(self, i):
+        # For the combined dataset, return the item from the appropriate dataset
+        if i < len(self.labeled_dataset):
+            # print(f"{i=}")
+            return self.labeled_dataset[i]
+        else:
+            # Adjust index for unlabeled dataset
+            adjusted_index = i - len(self.labeled_dataset)
+            # print(f"{adjusted_index=}")
+            return self.unlabeled_dataset[adjusted_index]
+
+    def __len__(self):
+        # Combined length of both datasets
+        return len(self.labeled_dataset) + len(self.unlabeled_dataset)

@@ -5,6 +5,17 @@ import numpy as np
 
 from LibMTL._record import _PerformanceMeter
 from LibMTL.utils import count_parameters
+import os
+import sys
+
+# Get the current directory of train.py
+current_dir = os.path.dirname(os.path.abspath(__file__))
+
+# Add the parent directory of to the Python path
+parent_dir = os.path.dirname(current_dir)
+sys.path.append(parent_dir)
+from examples.nyu.TwoSampler import *
+from  examples.nyu.create_dataset import *
 
 class Trainer(nn.Module):
     r'''A Multi-Task Learning Trainer.
@@ -183,6 +194,10 @@ class Trainer(nn.Module):
                 loader[task] = [dataloaders[task], iter(dataloaders[task])]
                 batch_num.append(len(dataloaders[task]))
             return loader, batch_num
+    def semi_supervised_dataloaders(labeled_indexes, unlabeled_indexes, batch_size, combinedset):
+        semi_supervised_sampler = TwoStreamBatchSampler(labeled_indexes, unlabeled_indexes, int(batch_size),int(batch_size/2))
+        semi_supervised_loader = torch.utils.data.DataLoader(combinedset, batch_sampler=semi_supervised_sampler)
+        return semi_supervised_loader
 
     def train(self, train_dataloaders, test_dataloaders, epochs, 
               val_dataloaders=None, return_weight=False):
@@ -293,8 +308,8 @@ class Trainer(nn.Module):
         if return_improvement:
             return improvement
 
-    def train_sl(self, train_dataloaders, test_dataloaders,u_dataloaders, epochs, 
-              val_dataloaders=None, return_weight=False):
+    def train_sl(self, labeled_dataloader, test_dataloaders, epochs, 
+              val_dataloaders=None, return_weight=False,unlabeled_dataloader=None, bs=None, labeled_dataset=None, unlabeled_dataset=None):
         r'''The training process of multi-task learning.
 
         Args:
@@ -308,111 +323,89 @@ class Trainer(nn.Module):
             epochs (int): The total training epochs.
             return_weight (bool): if ``True``, the loss weights will be returned.
         '''
-        train_loader, train_batch = self._prepare_dataloaders(train_dataloaders)
-        u_train_loader, u_train_batch = self._prepare_dataloaders(u_dataloaders)
+        train_loader, train_batch = self._prepare_dataloaders(labeled_dataloader)
+        u_train_loader, u_train_batch = self._prepare_dataloaders(unlabeled_dataloader)
+
         train_batch = max(train_batch) if self.multi_input else train_batch
+        u_train_batch = max(u_train_batch) if self.multi_input else u_train_batch
+        
         self.batch_weight = np.zeros([self.task_num, epochs, train_batch])
         self.model.train_loss_buffer = np.zeros([self.task_num, epochs])
         self.model.epochs = epochs
         for epoch in range(epochs):
-            # print(epoch)
-            # if epoch > 1 :
-            #     self.model.eval()
-            #     with torch.no_grad():
-            #         u_train_inputs, _ = self._process_data(u_train_loader)
-            #         u_train_inputs = u_train_inputs.to(self.device)
-            #         u_train_preds = self.model(u_train_inputs)
-            #         u_train_preds = self.process_preds(u_train_preds)
-            target={}
             self.model.epoch = epoch
             self.model.train()
             self.meter.record_time('begin')
-            for batch_index in range(train_batch):
-                if not self.multi_input:
-                    if epoch > 40 :
-                        self.model.eval()
-                        with torch.no_grad():
-                            u_train_inputs, _ = self._process_data(u_train_loader)
-                            u_train_inputs = u_train_inputs.to(self.device)
-                            u_train_preds = self.model(u_train_inputs)
-                            u_train_preds = self.process_preds(u_train_preds)
-                            # for key, value in u_train_preds.items():
-                            #     u_train_preds[key] = value.squeeze(0)
-                            #     # print('check now')
-                            #     # print(u_train_preds[key].shape)
-                            #     if key == 'segmentation':
-                            #         # print(pseudo_label[key].shape)
-                            #         if u_train_preds[key].shape == torch.Size([13, 288, 384]) :
-                            #             u_train_preds[key] = u_train_preds[key].view(13, 288, 384)
-                            #             u_train_preds[key], _ = F.softmax(u_train_preds[key], dim=0)#softlabels
-                            #             u_train_preds[key] = u_train_preds[key].view(288, 384)
-                            #             print(u_train_preds[key].shape)
-                        train_inputs, train_gts = self._process_data(train_loader)
-                        
-                        data = torch.cat([train_inputs,u_train_inputs],dim=0)
-                        # print(data.shape)
-                        self.model.train()
-                        # for key, value in u_train_preds.items():
-                        #     u_train_preds[key] = value.squeeze(0)
-                        #     # print('check now')
-                        #     # print(u_train_preds[key].shape)
-                        #     z = u_train_preds[key].size(0)
-                        #     if key == 'segmentation':
-                        #         # print(pseudo_label[key].shape)
-                        #         if not u_train_preds[key].shape == train_gts[key].shape :
-                        #             u_train_preds[key] = u_train_preds[key].view(z, 13, 288, 384)
-                        #             print(u_train_preds[key].shape)
-                        #             u_train_preds[key], _ = F.softmax(u_train_preds[key], dim=1)#softlabels
-                        #             # u_train_preds[key] = u_train_preds[key].view(288, 384)
-                        #             print(u_train_preds[key].shape)
-                        #     target.update({key : torch.cat([train_gts[key], u_train_preds[key]], dim=0)})
-
-
-
-
-                        for key, values in train_gts.items():#to merge predictions
-                            # print(train_gts[key].shape)
-                            # print(u_train_preds[key].shape)
-                            t_train_gts = train_gts[key]
-                            t_train_preds = u_train_preds[key]
-                            if key == 'segmentation':
-                                t_train_preds = F.softmax(t_train_preds, dim=1) #torch.sigmoid(t_train_preds) 
-                                #F.softmax(t_train_preds, dim=1)
-                                t_train_preds = t_train_preds.argmax(dim=1)
-                                # if not t_train_preds.shape == t_train_gts.shape :
-                                    # t_train_preds = t_train_preds.argmax(dim=1)
-                                # print('aaa')
-                                # print(t_train_gts.shape)
-                                # print(t_train_preds.shape)
-                            target.update({key : torch.cat([t_train_gts, t_train_preds], dim=0)})
-                            # print(target[key].shape)
-                        # target = torch.cat([train_gts,u_train_preds],dim=0)
-                        train_preds = self.model(data)
-                        train_preds = self.process_preds(train_preds)
-                        train_losses = self._compute_loss(train_preds, target)
-                        self.meter.update(train_preds, target) 
-                    else :
+            if epoch <= 39 : #itmeans n+1 epochs
+                for batch_index in range(train_batch):
+                    if not self.multi_input:
                         train_inputs, train_gts = self._process_data(train_loader)
                         train_preds = self.model(train_inputs)
                         train_preds = self.process_preds(train_preds)
                         train_losses = self._compute_loss(train_preds, train_gts)
                         self.meter.update(train_preds, train_gts)
-                else:
-                    train_losses = torch.zeros(self.task_num).to(self.device)
-                    for tn, task in enumerate(self.task_name):
-                        train_input, train_gt = self._process_data(train_loader[task])
-                        train_pred = self.model(train_input, task)
-                        train_pred = train_pred[task]
-                        train_pred = self.process_preds(train_pred, task)
-                        train_losses[tn] = self._compute_loss(train_pred, train_gt, task)
-                        self.meter.update(train_pred, train_gt, task)
+                    else:
+                        train_losses = torch.zeros(self.task_num).to(self.device)
+                        for tn, task in enumerate(self.task_name):
+                            train_input, train_gt = self._process_data(train_loader[task])
+                            train_pred = self.model(train_input, task)
+                            train_pred = train_pred[task]
+                            train_pred = self.process_preds(train_pred, task)
+                            train_losses[tn] = self._compute_loss(train_pred, train_gt, task)
+                            self.meter.update(train_pred, train_gt, task)
 
-                self.optimizer.zero_grad(set_to_none=False)
-                w = self.model.backward(train_losses, **self.kwargs['weight_args'])
-                if w is not None:
-                    self.batch_weight[:, epoch, batch_index] = w
-                self.optimizer.step()
-            
+                    self.optimizer.zero_grad(set_to_none=False)
+                    w = self.model.backward(train_losses, **self.kwargs['weight_args'])
+                    if w is not None:
+                        self.batch_weight[:, epoch, batch_index] = w
+                    self.optimizer.step()
+            else :
+                self.model.eval()
+                pseudo_labels = {}
+                with torch.no_grad():
+                    for batch_index in range(u_train_batch):
+                        u_train_inputs, _ = self._process_data(u_train_loader)
+                        u_train_preds = self.model(u_train_inputs)
+                        u_train_preds = self.process_preds(u_train_preds)
+                        u_train_preds_flipped = self.model(torch.flip(u_train_inputs, [3]))
+                        u_train_preds_flipped = self.process_preds(u_train_preds_flipped)
+                        for key in u_train_preds_flipped:
+                            u_train_preds_flipped[key] = torch.flip(u_train_preds_flipped[key], [3])
+                        for key in u_train_preds:
+                            u_train_preds[key] = (u_train_preds[key] + u_train_preds_flipped[key]) / 2.0
+                        for key, value in u_train_preds.items():
+                            if key == 'segmentation':
+                                u_train_preds[key] = F.softmax(value, dim=1)
+                        for key, value in u_train_preds.items():
+                            if key not in pseudo_labels:
+                                pseudo_labels[key] = []
+                            pseudo_labels[key].append(value)
+    # Concatenate pseudo labels for all batches for each modality
+                for key, value in pseudo_labels.items():
+                    pseudo_labels[key] = torch.cat(value)
+                unlabeled_dataset.update_pseudo_labels(pseudo_labels)
+                labeled_indices = list(range(0,len(labeled_dataset)))
+                unlabeled_indices = list(range(len(labeled_dataset), len(unlabeled_dataset)+len(labeled_dataset)))
+                # print(len(labeled_indices))
+                combinedset = CombinedNYUv2(labeled_dataset,unlabeled_dataset)
+                combined_loader = self.semi_supervised_dataloaders(labeled_indices, unlabeled_indices, bs/4, combinedset)
+                c_train_loader, c_train_batch = self._prepare_dataloaders(combined_loader)
+                c_train_batch = max(c_train_batch) if self.multi_input else c_train_batch
+                self.model.train()
+                for batch_index in range(c_train_batch):
+                    c_train_inputs, c_train_gts = self._process_data(c_train_loader)
+                    c_train_preds = self.model(c_train_inputs)
+                    c_train_preds = self.process_preds(c_train_preds)
+                    train_losses = self._compute_loss(c_train_preds, c_train_gts)
+                    self.meter.update(c_train_preds, c_train_gts)
+                    self.optimizer.zero_grad(set_to_none=False)
+                    w = self.model.backward(train_losses, **self.kwargs['weight_args'])
+                    # if w is not None:
+                    #     self.batch_weight[:, epoch, batch_index] = w
+                    self.optimizer.step()
+                # del combined_loader
+                # del pseudo_labels
+                # torch.cuda.empty_cache()
             self.meter.record_time('end')
             self.meter.get_score()
             self.model.train_loss_buffer[:, epoch] = self.meter.loss_item

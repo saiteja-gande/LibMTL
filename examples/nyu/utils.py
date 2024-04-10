@@ -11,12 +11,15 @@ class SegMetric(AbsMetric):
     def __init__(self):
         super(SegMetric, self).__init__()
         
-        self.num_classes = 13
+        self.num_classes = 14
         self.record = torch.zeros((self.num_classes, self.num_classes), dtype=torch.int64)
         
     def update_fun(self, pred, gt):
         self.record = self.record.to(pred.device)
+        # print(gt.shape)
+        # print(pred.shape)
         pred = pred.softmax(1).argmax(1).flatten()
+        gt = gt.argmax(1)
         gt = gt.long().flatten()
         k = (gt >= 0) & (gt < self.num_classes)
         inds = self.num_classes * gt[k].to(torch.int64) + pred[k]
@@ -85,11 +88,12 @@ class NormalMetric(AbsMetric):
 class SegLoss(AbsLoss):
     def __init__(self):
         super(SegLoss, self).__init__()
-        self.loss_fn = nn.CrossEntropyLoss(ignore_index=-1)
-        
+        self.loss_fn = nn.KLDivLoss()
+
     def compute_loss(self, pred, gt):
-        return self.loss_fn(pred, gt.long())
-    
+        gt = F.softmax(gt, dim=1)  # Apply softmax to gt
+        pred = F.log_softmax(pred, dim=1)  # Apply log_softmax to pred
+        return self.loss_fn(pred, gt)
 class DepthLoss(AbsLoss):
     def __init__(self):
         super(DepthLoss, self).__init__()
