@@ -22,7 +22,10 @@ class Aligned_MTL(AbsWeighting):
             per_grads, grads = grads[0], grads[1]
         
         M = torch.matmul(grads, grads.t()) # [num_tasks, num_tasks]
-        lmbda, V = torch.symeig(M, eigenvectors=True)
+        try: #symeig is depreciated in pytorch 1.8 and earlier
+            lmbda, V = torch.symeig(M, eigenvectors=True)
+        except:
+            lmbda, V = torch.linalg.eigh(M, UPLO='U')
         tol = (
             torch.max(lmbda)
             * max(M.shape[-2:])
