@@ -88,12 +88,14 @@ class NormalMetric(AbsMetric):
 class SegLoss(AbsLoss):
     def __init__(self):
         super(SegLoss, self).__init__()
-        self.loss_fn = nn.KLDivLoss()
+        # self.loss_fn = nn.KLDivLoss()
+        # self.loss_fn = F.cross_entropy()
 
     def compute_loss(self, pred, gt):
-        gt = F.softmax(gt, dim=1)  # Apply softmax to gt
-        pred = F.log_softmax(pred, dim=1)  # Apply log_softmax to pred
-        return self.loss_fn(pred, gt)
+        # gt = F.softmax(gt, dim=1)  # Apply softmax to gt--for kld
+        # pred = F.log_softmax(pred, dim=1)  # Apply log_softmax to pred --for kld
+        # return self.loss_fn(pred, gt)
+        return F.cross_entropy(pred, gt)
 class DepthLoss(AbsLoss):
     def __init__(self):
         super(DepthLoss, self).__init__()

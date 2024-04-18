@@ -194,7 +194,7 @@ class Trainer(nn.Module):
                 loader[task] = [dataloaders[task], iter(dataloaders[task])]
                 batch_num.append(len(dataloaders[task]))
             return loader, batch_num
-    def semi_supervised_dataloaders(labeled_indexes, unlabeled_indexes, batch_size, combinedset):
+    def semi_supervised_dataloaders(self, labeled_indexes, unlabeled_indexes, batch_size, combinedset):
         semi_supervised_sampler = TwoStreamBatchSampler(labeled_indexes, unlabeled_indexes, int(batch_size),int(batch_size/2))
         semi_supervised_loader = torch.utils.data.DataLoader(combinedset, batch_sampler=semi_supervised_sampler)
         return semi_supervised_loader
@@ -366,16 +366,20 @@ class Trainer(nn.Module):
                     for batch_index in range(u_train_batch):
                         u_train_inputs, _ = self._process_data(u_train_loader)
                         u_train_preds = self.model(u_train_inputs)
-                        u_train_preds = self.process_preds(u_train_preds)
+                        u_train_preds = self.process_preds(u_train_preds)                               
                         u_train_preds_flipped = self.model(torch.flip(u_train_inputs, [3]))
                         u_train_preds_flipped = self.process_preds(u_train_preds_flipped)
+                        for key, value in u_train_preds.items(): #new apl
+                            if key == 'segmentation': #new apl
+                                u_train_preds[key] = F.softmax(value, dim=1) #new apl
+                                u_train_preds_flipped[key] = F.softmax(u_train_preds_flipped[key], dim=1) #new apl
                         for key in u_train_preds_flipped:
                             u_train_preds_flipped[key] = torch.flip(u_train_preds_flipped[key], [3])
                         for key in u_train_preds:
                             u_train_preds[key] = (u_train_preds[key] + u_train_preds_flipped[key]) / 2.0
-                        for key, value in u_train_preds.items():
-                            if key == 'segmentation':
-                                u_train_preds[key] = F.softmax(value, dim=1)
+                        # for key, value in u_train_preds.items(): #new apl inverse
+                        #     if key == 'segmentation': #new apl inverse
+                        #         u_train_preds[key] = F.softmax(value, dim=1) #new apl inverse
                         for key, value in u_train_preds.items():
                             if key not in pseudo_labels:
                                 pseudo_labels[key] = []
@@ -388,7 +392,7 @@ class Trainer(nn.Module):
                 unlabeled_indices = list(range(len(labeled_dataset), len(unlabeled_dataset)+len(labeled_dataset)))
                 # print(len(labeled_indices))
                 combinedset = CombinedNYUv2(labeled_dataset,unlabeled_dataset)
-                combined_loader = self.semi_supervised_dataloaders(labeled_indices, unlabeled_indices, bs/4, combinedset)
+                combined_loader = self.semi_supervised_dataloaders(labeled_indices, unlabeled_indices, bs, combinedset)
                 c_train_loader, c_train_batch = self._prepare_dataloaders(combined_loader)
                 c_train_batch = max(c_train_batch) if self.multi_input else c_train_batch
                 self.model.train()
