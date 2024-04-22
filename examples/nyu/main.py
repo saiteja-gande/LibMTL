@@ -43,23 +43,15 @@ def main(params):
         pin_memory=True)
     
     # define tasks
-    task_dict = {'segmentation': {'metrics':['mIoU', 'pixAcc'], 
-                              'metrics_fn': SegMetric(),
-                              'loss_fn': SegLoss(),
-                              'weight': [1, 1]}, 
-                 'depth': {'metrics':['abs_err', 'rel_err'], 
+    task_dict = {'depth': {'metrics':['abs_err', 'rel_err'], 
                            'metrics_fn': DepthMetric(),
                            'loss_fn': DepthLoss(),
-                           'weight': [0, 0]},
-                 'normal': {'metrics':['mean', 'median', '<11.25', '<22.5', '<30'], 
-                            'metrics_fn': NormalMetric(),
-                            'loss_fn': NormalLoss(),
-                            'weight': [0, 0, 1, 1, 1]}}
+                           'weight': [0, 0]}}
     
     # define encoder and decoders
     def encoder_class(): 
         return resnet_dilated('resnet50')
-    num_out_channels = {'segmentation': 14, 'depth': 1, 'normal': 3}
+    num_out_channels = {'depth': 1}
     decoders = nn.ModuleDict({task: DeepLabHead(2048, 
                                                 num_out_channels[task]) for task in list(task_dict.keys())})
     
