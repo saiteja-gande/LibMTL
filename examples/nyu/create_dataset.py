@@ -8,6 +8,7 @@ import numpy as np
 import random
 import json
 from LibMTL.utils import get_root_dir
+from torchvision.transforms import Resize
 
 
 class RandomScaleCrop(object):
@@ -48,6 +49,7 @@ class NYUv2(Dataset):
         self.augmentation = augmentation
         self.pseudo_labels = {}
         self._pseudo_labels_updated = False
+        self.resize = Resize((280, 280))
 
         with open(os.path.join(get_root_dir(), 'examples/nyu', '75labeled_25unlabeled_data.json'), 'r') as f:
             data_split = json.load(f)
@@ -75,8 +77,8 @@ class NYUv2(Dataset):
             
             pseudo_label = {key: value[i].float() for key, value in self.pseudo_labels.items()}
             image = torch.from_numpy(np.moveaxis(np.load(self.data_path + '/image/{:d}.npy'.format(i)), -1, 0))
-            image = image.to("cpu")
-            return image.float(), {'segmentation': pseudo_label['segmentation'].float().to("cpu")}
+            image = self.resize(image.to("cpu"))
+            return image.float(), {'segmentation': self.resize(pseudo_label['segmentation'].float().to("cpu"))}
         else:
             image = torch.from_numpy(np.moveaxis(np.load(self.data_path + '/image/{:d}.npy'.format(index)), -1, 0))
             semantic = torch.from_numpy(np.load(self.data_path + '/label/{:d}.npy'.format(index)))
@@ -93,7 +95,7 @@ class NYUv2(Dataset):
                     # normal[0, :, :] = - normal[0, :, :]
             semantic+=1
             semantic = F.one_hot(semantic.long(), num_classes=14).permute(2, 0, 1)
-            return image.float(), {'segmentation': semantic.float()}
+            return self.resize(image.float()), {'segmentation': self.resize(semantic.float())}
 
     def __len__(self):
         if self.mode == 'unlabeled' and self._pseudo_labels_updated:

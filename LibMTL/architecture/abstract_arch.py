@@ -28,7 +28,7 @@ class AbsArchitecture(nn.Module):
         self.multi_input = multi_input
         self.device = device
         self.kwargs = kwargs
-        
+        self.conved = nn.Conv2d(384, 2048, 1)
         if self.rep_grad:
             self.rep_tasks = {}
             self.rep = {}
@@ -45,6 +45,8 @@ class AbsArchitecture(nn.Module):
         """
         out = {}
         s_rep = self.encoder(inputs)
+        s_rep = s_rep.view(-1, 384, 1, 1)
+        s_rep = self.conved(s_rep)
         same_rep = True if not isinstance(s_rep, list) and not self.multi_input else False
         for tn, task in enumerate(self.task_name):
             if task_name is not None and task != task_name:

@@ -22,7 +22,7 @@ def parse_args(parser):
     parser.add_argument('--train_bs', default=8, type=int, help='batch size for training')
     parser.add_argument('--test_bs', default=8, type=int, help='batch size for test')
     parser.add_argument('--epochs', default=200, type=int, help='training epochs')
-    parser.add_argument('--dataset_path', default='/home/saiteja/LibMTL/nyuv2', type=str, help='dataset path')
+    parser.add_argument('--dataset_path', default='/home/g054545/LibMTL', type=str, help='dataset path')
     return parser.parse_args()
     
 def main(params):
@@ -48,9 +48,29 @@ def main(params):
                               'loss_fn': SegLoss(),
                               'weight': [1, 1]}}
     
-    # define encoder and decoders
-    def encoder_class(): 
-        return resnet_dilated('resnet50')
+    import vision_transformer as vvv
+    from urllib.parse import urlparse
+    def load_pretrained_weights(model, pretrained_weights, checkpoint_key):
+        if urlparse(pretrained_weights).scheme:  # If it looks like an URL
+            state_dict = torch.hub.load_state_dict_from_url(pretrained_weights, map_location="cpu")
+        else:
+            state_dict = torch.load(pretrained_weights, map_location="cpu")
+        if checkpoint_key is not None and checkpoint_key in state_dict:
+            state_dict = state_dict[checkpoint_key]
+        # remove `module.` prefix
+        state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
+        # remove `backbone.` prefix induced by multicrop wrapper
+        state_dict = {k.replace("backbone.", ""): v for k, v in state_dict.items()}
+        model.load_state_dict(state_dict, strict=False)
+        return model
+        
+    def encoder_class():
+        model = load_pretrained_weights(vvv.vit_large(patch_size=14),"https://dl.fbaipublicfiles.com/dinov2/dinov2_vitl14/dinov2_vitl14_ade20k_linear_head.pth","teacher")
+        # model.cuda()
+        print(model)
+        return model  
+        # return torch.hub.load('facebookresearch/dinov2', 'dinov2_vits14') 
+        # return resnet_dilated('resnet50')
     num_out_channels = {'segmentation': 14}
     decoders = nn.ModuleDict({task: DeepLabHead(2048, 
                                                 num_out_channels[task]) for task in list(task_dict.keys())})
@@ -70,7 +90,7 @@ def main(params):
                                             **kwargs)
 
         def process_preds(self, preds):
-            img_size = (288, 384)
+            img_size = (280, 280)
             for task in self.task_name:
                 preds[task] = F.interpolate(preds[task], img_size, mode='bilinear', align_corners=True)
             return preds
