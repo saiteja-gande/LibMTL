@@ -16,7 +16,7 @@ parent_dir = os.path.dirname(current_dir)
 sys.path.append(parent_dir)
 from examples.nyu.TwoSampler import *
 from  examples.nyu.create_dataset import *
-
+import wandb
 class Trainer(nn.Module):
     r'''A Multi-Task Learning Trainer.
 
@@ -198,7 +198,13 @@ class Trainer(nn.Module):
         semi_supervised_sampler = TwoStreamBatchSampler(labeled_indexes, unlabeled_indexes, int(batch_size),int(batch_size/2))
         semi_supervised_loader = torch.utils.data.DataLoader(combinedset, batch_sampler=semi_supervised_sampler)
         return semi_supervised_loader
-
+    
+    def visualization(self,image,label,prediction, epoch, string = ""):
+        label = np.squeeze(label.cpu().numpy(),axis=0)
+        prediction = np.squeeze(prediction.cpu().detach().numpy(),axis=0)
+        wandb.log({"Depth": wandb.Image(image,masks={"predictions": {"mask_data":prediction},
+                    "groundtruth": {"mask_data":label}},caption=f"{string} Image at the epoch {epoch}")})
+        
     def train(self, train_dataloaders, test_dataloaders, epochs, 
               val_dataloaders=None, return_weight=False):
         r'''The training process of multi-task learning.
@@ -336,7 +342,7 @@ class Trainer(nn.Module):
             self.model.epoch = epoch
             self.model.train()
             self.meter.record_time('begin')
-            if epoch <= 39 : #itmeans n+1 epochs
+            if epoch <= 9 : #itmeans n+1 epochs
                 for batch_index in range(train_batch):
                     if not self.multi_input:
                         train_inputs, train_gts = self._process_data(train_loader)
@@ -344,6 +350,9 @@ class Trainer(nn.Module):
                         train_preds = self.process_preds(train_preds)
                         train_losses = self._compute_loss(train_preds, train_gts)
                         self.meter.update(train_preds, train_gts)
+                        if (epoch == 8 and batch_index == 0) or (epoch == 0 and batch_index == 0) :
+                                self.visualization(image=train_inputs[0],label = train_gts['depth'][0], 
+                                                prediction=train_preds['depth'][0], epoch=epoch, string="supervised")
                     else:
                         train_losses = torch.zeros(self.task_num).to(self.device)
                         for tn, task in enumerate(self.task_name):
@@ -367,16 +376,16 @@ class Trainer(nn.Module):
                         u_train_inputs, _ = self._process_data(u_train_loader)
                         u_train_preds = self.model(u_train_inputs)
                         u_train_preds = self.process_preds(u_train_preds)                               
-                        u_train_preds_flipped = self.model(torch.flip(u_train_inputs, [3]))
-                        u_train_preds_flipped = self.process_preds(u_train_preds_flipped)
-                        for key, value in u_train_preds.items(): #new apl
-                            if key == 'segmentation': #new apl
-                                u_train_preds[key] = F.softmax(value, dim=1) #new apl
-                                u_train_preds_flipped[key] = F.softmax(u_train_preds_flipped[key], dim=1) #new apl
-                        for key in u_train_preds_flipped:
-                            u_train_preds_flipped[key] = torch.flip(u_train_preds_flipped[key], [3])
-                        for key in u_train_preds:
-                            u_train_preds[key] = (u_train_preds[key] + u_train_preds_flipped[key]) / 2.0
+                        # u_train_preds_flipped = self.model(torch.flip(u_train_inputs, [3]))
+                        # u_train_preds_flipped = self.process_preds(u_train_preds_flipped)
+                        # for key, value in u_train_preds.items(): #new apl
+                        #     if key == 'segmentation': #new apl
+                        #         u_train_preds[key] = F.softmax(value, dim=1) #new apl
+                        #         u_train_preds_flipped[key] = F.softmax(u_train_preds_flipped[key], dim=1) #new apl
+                        # for key in u_train_preds_flipped:
+                        #     u_train_preds_flipped[key] = torch.flip(u_train_preds_flipped[key], [3])
+                        # for key in u_train_preds:
+                        #     u_train_preds[key] = (u_train_preds[key] + u_train_preds_flipped[key]) / 2.0
                         # for key, value in u_train_preds.items(): #new apl inverse
                         #     if key == 'segmentation': #new apl inverse
                         #         u_train_preds[key] = F.softmax(value, dim=1) #new apl inverse
@@ -402,6 +411,10 @@ class Trainer(nn.Module):
                     c_train_preds = self.process_preds(c_train_preds)
                     train_losses = self._compute_loss(c_train_preds, c_train_gts)
                     self.meter.update(c_train_preds, c_train_gts)
+                    if epoch == 10 and batch_index == 0 :
+                        for i in range(c_train_inputs.shape[0]):
+                            self.visualization(image=c_train_inputs[i],label = c_train_gts['depth'][i],
+                                               prediction=c_train_preds['depth'][i], epoch=epoch, string="semi-supervised")
                     self.optimizer.zero_grad(set_to_none=False)
                     w = self.model.backward(train_losses, **self.kwargs['weight_args'])
                     # if w is not None:
