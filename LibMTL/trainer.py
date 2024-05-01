@@ -336,7 +336,7 @@ class Trainer(nn.Module):
             self.model.epoch = epoch
             self.model.train()
             self.meter.record_time('begin')
-            if epoch <= 39 : #itmeans n+1 epochs
+            if epoch <= 9 : #itmeans n+1 epochs
                 for batch_index in range(train_batch):
                     if not self.multi_input:
                         train_inputs, train_gts = self._process_data(train_loader)
@@ -367,16 +367,16 @@ class Trainer(nn.Module):
                         u_train_inputs, _ = self._process_data(u_train_loader)
                         u_train_preds = self.model(u_train_inputs)
                         u_train_preds = self.process_preds(u_train_preds)                               
-                        u_train_preds_flipped = self.model(torch.flip(u_train_inputs, [3]))
-                        u_train_preds_flipped = self.process_preds(u_train_preds_flipped)
-                        for key, value in u_train_preds.items(): #new apl
-                            if key == 'segmentation': #new apl
-                                u_train_preds[key] = F.softmax(value, dim=1) #new apl
-                                u_train_preds_flipped[key] = F.softmax(u_train_preds_flipped[key], dim=1) #new apl
-                        for key in u_train_preds_flipped:
-                            u_train_preds_flipped[key] = torch.flip(u_train_preds_flipped[key], [3])
-                        for key in u_train_preds:
-                            u_train_preds[key] = (u_train_preds[key] + u_train_preds_flipped[key]) / 2.0
+                        # u_train_preds_flipped = self.model(torch.flip(u_train_inputs, [3]))
+                        # u_train_preds_flipped = self.process_preds(u_train_preds_flipped)
+                        # for key, value in u_train_preds.items(): #new apl
+                        #     if key == 'segmentation': #new apl
+                        #         u_train_preds[key] = F.softmax(value, dim=1) #new apl
+                        #         u_train_preds_flipped[key] = F.softmax(u_train_preds_flipped[key], dim=1) #new apl
+                        # for key in u_train_preds_flipped:
+                        #     u_train_preds_flipped[key] = torch.flip(u_train_preds_flipped[key], [3])
+                        # for key in u_train_preds:
+                        #     u_train_preds[key] = (u_train_preds[key] + u_train_preds_flipped[key]) / 2.0
                         # for key, value in u_train_preds.items(): #new apl inverse
                         #     if key == 'segmentation': #new apl inverse
                         #         u_train_preds[key] = F.softmax(value, dim=1) #new apl inverse

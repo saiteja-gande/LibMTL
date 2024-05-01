@@ -76,8 +76,7 @@ class NYUv2(Dataset):
             pseudo_label = {key: value[i].float() for key, value in self.pseudo_labels.items()}
             image = torch.from_numpy(np.moveaxis(np.load(self.data_path + '/image/{:d}.npy'.format(i)), -1, 0))
             image = image.to("cpu")
-            return image.float(), {'segmentation': pseudo_label['segmentation'].float().to("cpu"), 
-                           'depth': pseudo_label['depth'].float().to("cpu"), 
+            return image.float(), {'depth': pseudo_label['depth'].float().to("cpu"), 
                            'normal': pseudo_label['normal'].float().to("cpu")}
         else:
             image = torch.from_numpy(np.moveaxis(np.load(self.data_path + '/image/{:d}.npy'.format(index)), -1, 0))
@@ -89,13 +88,13 @@ class NYUv2(Dataset):
                 image, semantic, depth, normal = RandomScaleCrop()(image, semantic, depth, normal)
                 if torch.rand(1) < 0.5:
                     image = torch.flip(image, dims=[2])
-                    semantic = torch.flip(semantic, dims=[1])
+                    # semantic = torch.flip(semantic, dims=[1])
                     depth = torch.flip(depth, dims=[2])
                     normal = torch.flip(normal, dims=[2])
                     normal[0, :, :] = - normal[0, :, :]
-            semantic+=1
-            semantic = F.one_hot(semantic.long(), num_classes=14).permute(2, 0, 1)
-            return image.float(), {'segmentation': semantic.float(), 'depth': depth.float(), 'normal': normal.float()}
+            # semantic+=1
+            # semantic = F.one_hot(semantic.long(), num_classes=14).permute(2, 0, 1)
+            return image.float(), {'depth': depth.float(), 'normal': normal.float()}
 
     def __len__(self):
         if self.mode == 'unlabeled' and self._pseudo_labels_updated:
