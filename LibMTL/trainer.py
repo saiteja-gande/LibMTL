@@ -343,6 +343,7 @@ class Trainer(nn.Module):
         for epoch in range(epochs):
             self.model.epoch = epoch
             self.model.train()
+            # print(self.model)
             self.meter.record_time('begin')
             if epoch <= 39 : #itmeans n+1 epochs
                 for batch_index in range(train_batch):

@@ -19,8 +19,8 @@ from TwoSampler import *
 def parse_args(parser):
     parser.add_argument('--aug', action='store_true', default=False, help='data augmentation')
     parser.add_argument('--train_mode', default='trainval', type=str, help='trainval, train')
-    parser.add_argument('--train_bs', default=8, type=int, help='batch size for training')
-    parser.add_argument('--test_bs', default=8, type=int, help='batch size for test')
+    parser.add_argument('--train_bs', default=2, type=int, help='batch size for training')
+    parser.add_argument('--test_bs', default=2, type=int, help='batch size for test')
     parser.add_argument('--epochs', default=200, type=int, help='training epochs')
     parser.add_argument('--dataset_path', default='/home/g054545/LibMTL', type=str, help='dataset path')
     return parser.parse_args()
@@ -65,7 +65,7 @@ def main(params):
         return model
         
     def encoder_class():
-        model = load_pretrained_weights(vvv.vit_large(patch_size=14),"https://dl.fbaipublicfiles.com/dinov2/dinov2_vitl14/dinov2_vitl14_ade20k_linear_head.pth","teacher")
+        model = load_pretrained_weights(vvv.vit_small(patch_size=7),"https://dl.fbaipublicfiles.com/dinov2/dinov2_vits14/dinov2_vits14_ade20k_linear_head.pth","teacher")
         # model.cuda()
         print(model)
         return model  

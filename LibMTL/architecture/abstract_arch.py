@@ -4,19 +4,11 @@ import torch.nn.functional as F
 import numpy as np
 
 
-class AbsArchitecture(nn.Module):
-    r"""An abstract class for MTL architectures.
+class Reshape(nn.Module):
+    def forward(self, x):
+        return x.view(x.size(0), 2048, 36, 48)
 
-    Args:
-        task_name (list): A list of strings for all tasks.
-        encoder_class (class): A neural network class.
-        decoders (dict): A dictionary of name-decoder pairs of type (:class:`str`, :class:`torch.nn.Module`).
-        rep_grad (bool): If ``True``, the gradient of the representation for each task can be computed.
-        multi_input (bool): Is ``True`` if each task has its own input data, otherwise is ``False``. 
-        device (torch.device): The device where model and data will be allocated. 
-        kwargs (dict): A dictionary of hyperparameters of architectures.
-     
-    """
+class AbsArchitecture(nn.Module):
     def __init__(self, task_name, encoder_class, decoders, rep_grad, multi_input, device, **kwargs):
         super(AbsArchitecture, self).__init__()
         
@@ -28,7 +20,12 @@ class AbsArchitecture(nn.Module):
         self.multi_input = multi_input
         self.device = device
         self.kwargs = kwargs
-        self.conved = nn.Conv2d(384, 2048, 1)
+        
+        # Add a fully connected layer and reshape operation
+        self.fc1 = nn.Linear(384, 128)
+        self.fc2 = nn.Linear(128, 2048*36*48)
+        self.reshape = Reshape()
+        
         if self.rep_grad:
             self.rep_tasks = {}
             self.rep = {}
@@ -45,8 +42,12 @@ class AbsArchitecture(nn.Module):
         """
         out = {}
         s_rep = self.encoder(inputs)
-        s_rep = s_rep.view(-1, 384, 1, 1)
-        s_rep = self.conved(s_rep)
+        
+        # Apply the fully connected layer and reshape operation if necessary
+        s_rep = self.fc2(self.fc1(s_rep))
+        s_rep = self.reshape(s_rep)
+        
+        # print(f'the shape of the input after encoder is{s_rep.shape}')
         same_rep = True if not isinstance(s_rep, list) and not self.multi_input else False
         for tn, task in enumerate(self.task_name):
             if task_name is not None and task != task_name:
@@ -55,6 +56,7 @@ class AbsArchitecture(nn.Module):
             ss_rep = self._prepare_rep(ss_rep, task, same_rep)
             out[task] = self.decoders[task](ss_rep)
         return out
+
     
     def get_share_params(self):
         r"""Return the shared parameters of the model.
