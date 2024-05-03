@@ -44,7 +44,9 @@ class AbsArchitecture(nn.Module):
         s_rep = self.encoder(inputs)
         
         # Apply the fully connected layer and reshape operation if necessary
-        s_rep = self.fc2(self.fc1(s_rep))
+        s_rep = self.fc1(s_rep)
+        s_rep = torch.relu(s_rep)
+        s_rep = self.fc2(s_rep)
         s_rep = self.reshape(s_rep)
         
         # print(f'the shape of the input after encoder is{s_rep.shape}')
