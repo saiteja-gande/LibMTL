@@ -200,10 +200,11 @@ class Trainer(nn.Module):
         return semi_supervised_loader
     
     def visualization(self,image,label,prediction, epoch, string = ""):
-        label = np.squeeze(label.cpu().numpy(),axis=0)
-        prediction = np.squeeze(prediction.cpu().detach().numpy(),axis=0)
-        wandb.log({"Depth": wandb.Image(image,masks={"predictions": {"mask_data":prediction},
-                    "groundtruth": {"mask_data":label}},caption=f"{string} Image at the epoch {epoch}")})
+        label = label.cpu()
+        prediction = prediction.cpu().detach()
+        wandb.log({"Normals": wandb.Image(image)})
+        wandb.log({"Normals_label": wandb.Image(label)})
+        wandb.log({"Normals_prediction": wandb.Image(prediction)})
         
     def train(self, train_dataloaders, test_dataloaders, epochs, 
               val_dataloaders=None, return_weight=False):
@@ -351,8 +352,8 @@ class Trainer(nn.Module):
                         train_losses = self._compute_loss(train_preds, train_gts)
                         self.meter.update(train_preds, train_gts)
                         if (epoch == 8 and batch_index == 0) or (epoch == 0 and batch_index == 0) :
-                                self.visualization(image=train_inputs[0],label = train_gts['depth'][0], 
-                                                prediction=train_preds['depth'][0], epoch=epoch, string="supervised")
+                                self.visualization(image=train_inputs[0],label = train_gts['normal'][0], 
+                                                prediction=train_preds['normal'][0], epoch=epoch, string="supervised")
                     else:
                         train_losses = torch.zeros(self.task_num).to(self.device)
                         for tn, task in enumerate(self.task_name):
@@ -413,16 +414,16 @@ class Trainer(nn.Module):
                     self.meter.update(c_train_preds, c_train_gts)
                     if epoch == 10 and batch_index == 0 :
                         for i in range(c_train_inputs.shape[0]):
-                            self.visualization(image=c_train_inputs[i],label = c_train_gts['depth'][i],
-                                               prediction=c_train_preds['depth'][i], epoch=epoch, string="semi-supervised")
+                            self.visualization(image=c_train_inputs[i],label = c_train_gts['normal'][i],
+                                               prediction=c_train_preds['normal'][i], epoch=epoch, string="semi-supervised")
                     self.optimizer.zero_grad(set_to_none=False)
                     w = self.model.backward(train_losses, **self.kwargs['weight_args'])
                     # if w is not None:
                     #     self.batch_weight[:, epoch, batch_index] = w
                     self.optimizer.step()
                 # del combined_loader
-                # del pseudo_labels
-                # torch.cuda.empty_cache()
+                del pseudo_labels
+                torch.cuda.empty_cache()
             self.meter.record_time('end')
             self.meter.get_score()
             self.model.train_loss_buffer[:, epoch] = self.meter.loss_item
